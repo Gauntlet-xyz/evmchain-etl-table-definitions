@@ -4,6 +4,11 @@ on:
     push:
         branches: [main]
 
+# Read-only token: the job only checks out code and writes credentials to a
+# temporary file inside the runner, never back to the repository.
+permissions:
+  contents: read
+
 jobs:
   get-updated-dirs:
     runs-on: ubuntu-latest
@@ -12,7 +17,7 @@ jobs:
 
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v2
+        uses: actions/checkout@ee0669bd1cc54295c223e0bb666b733df41de1c5 # v2.7.0
         with:
           fetch-depth: 0
 
@@ -35,19 +40,27 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v2
+      uses: actions/checkout@ee0669bd1cc54295c223e0bb666b733df41de1c5 # v2.7.0
 
     - name: Authenticate Docker to GCR
+      env:
+        SERVICE_ACCOUNT_PROD: ${{ secrets.SERVICE_ACCOUNT_PROD }}
       run: |
         echo "$SERVICE_ACCOUNT_PROD" > sa_key.json
         cat sa_key.json | docker login -u _json_key --password-stdin https://gcr.io
         rm sa_key.json
-      env:
-        SERVICE_ACCOUNT_PROD: ${{ secrets.SERVICE_ACCOUNT_PROD }}
 
     - name: Run Docker image
+      env:
+        SERVICE_ACCOUNT_PROD: ${{ secrets.SERVICE_ACCOUNT_PROD }}
+        # Directory names originate from merged PR content; pass them via the
+        # environment so they are never interpolated into the shell script text
+        # (script-injection hardening — this job also materializes GCP
+        # service-account credentials).
+        MATRIX_DIR: ${{ matrix.dir }}
+        PARSE_PROJECT: ${{ vars.PARSE_PROJECT }}
       run: |
-        CHAIN_NAME=${{ matrix.dir }}
+        CHAIN_NAME=$MATRIX_DIR
         CHAIN_NAME=${CHAIN_NAME#parse/table_definitions_} # this will remove 'parse/table_definitions_' from start
         DATASET_NAME=${CHAIN_NAME#*/}  # this will get the substring after the first '/'
         CHAIN_NAME=${CHAIN_NAME%/*}  # this will get the substring before the first '/'
@@ -56,12 +69,11 @@ jobs:
         docker run \
           -v $PWD:/app \
           -e GOOGLE_APPLICATION_CREDENTIALS=/app/credentials.json \
-          gcr.io/${{ vars.PARSE_PROJECT }}/evmchain-etl-parse:latest \
-          --project ${{ vars.PARSE_PROJECT }} \
+          gcr.io/"$PARSE_PROJECT"/evmchain-etl-parse:latest \
+          --project "$PARSE_PROJECT" \
           --environment prod \
-          --chain_name $CHAIN_NAME \
-          --dataset_name $DATASET_NAME \
-          --dataset_folder "/app/${{ matrix.dir }}"
+          --chain_name "$CHAIN_NAME" \
+          --dataset_name "$DATASET_NAME" \
+          --dataset_folder "/app/$MATRIX_DIR"
         rm ./credentials.json
-      env:
-        SERVICE_ACCOUNT_PROD: ${{ secrets.SERVICE_ACCOUNT_PROD }}
+```[cite: 20]
